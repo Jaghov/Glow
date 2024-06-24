@@ -205,6 +205,7 @@ target_distribution = Normal(torch.tensor(0).float().to(device),torch.tensor(1).
 # <- You may wish to add logging info here
 for epoch in range(num_epochs):
     total_loss = 0 # <- You may wish to add logging info here
+    err = 0
 
     with tqdm.tqdm(trainloader, unit="batch") as tepoch:
         for batch_idx, (data, _) in enumerate(tepoch):
@@ -233,19 +234,20 @@ for epoch in range(num_epochs):
             # Logging
             total_loss += loss.item()
             prior = target_distribution.log_prob(z).mean()
-            jacobian = log_det_jacobian/z.shape[0]
+            # jacobian = log_det_jacobian/z.shape[0]
+            # err += mse(data, model.inverse(z))
 
 
 
 
 
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
             #######################################################################
             #                       ** END OF YOUR CODE **
             #######################################################################
             if batch_idx % 20 == 0:
                 tepoch.set_description(f"Epoch {epoch}")
-                tepoch.set_postfix(loss=loss.item()/len(data), prior=prior, jacobian=jacobian)
+                tepoch.set_postfix(loss=loss.item()/len(data), prior=prior, err = err)
 
     # save the model
     if epoch == num_epochs - 1:
