@@ -39,15 +39,15 @@ transform = transforms.Compose(
     [transforms.ToTensor(),
      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-     # Inverse Transform (Unnormalize and Convert to PIL)
-inverse_transform = transforms.Compose([
-    transforms.Normalize((-1.0, -1.0, -1.0), (2.0, 2.0, 2.0)),  # Unnormalize
-    transforms.ToPILImage()  # Convert back to PIL Image
-])
+#      # Inverse Transform (Unnormalize and Convert to PIL)
+# inverse_transform = transforms.Compose([
+#     transforms.Normalize((-1.0, -1.0, -1.0), (2.0, 2.0, 2.0)),  # Unnormalize
+#     transforms.ToPILImage()  # Convert back to PIL Image
+# ])
 
 
 # Necessary Hyperparameters
-num_epochs = 1
+num_epochs = 10
 learning_rate = 5e-5
 batch_size = 64
 

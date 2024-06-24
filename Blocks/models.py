@@ -115,13 +115,34 @@ class ResNet(nn.Module):
   def forward(self, x):
     return self.net(x)
 
+class ConvBlock(nn.Module):
+  def __init__(self, in_channels, hidden_features=512):
+    super(ConvBlock, self).__init__()
+    layers =  [
+      WeightNormConv2d(in_channels, hidden_features, kernel_size=3, padding=1),
+      nn.ReLU(),
+      WeightNormConv2d(hidden_features, hidden_features, kernel_size=1),
+      nn.ReLU(),
+      WeightNormConv2d(hidden_features, 2*in_channels, kernel_size=3, padding=1),
+    ]
+    self.net = nn.Sequential(*layers)
+
+    self.net[0].conv.weight.data.normal_(0, 0.05)
+    self.net[0].conv.bias.data.zero_()
+
+    self.net[-1].conv.weight.data.normal_(0, 0.05)
+    self.net[-1].conv.bias.data.zero_()
+
+  def forward(self, x):
+    return self.net(x)
 
 class AffineCoupling(nn.Module):
     def __init__(self, n_channels):
         super(AffineCoupling, self).__init__()
         self.scale_scale = nn.Parameter(torch.zeros(1), requires_grad=True)
         self.shift_scale = nn.Parameter(torch.zeros(1), requires_grad=True)
-        self.net = ResNet(in_channels=n_channels//2)
+        # self.net = ResNet(in_channels=n_channels//2)
+        self.net = ConvBlock(in_channels= n_channels//2)
 
     def forward(self, x):
       # Split the input in 2 channelwise
