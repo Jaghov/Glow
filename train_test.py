@@ -90,12 +90,9 @@ def mse(x, x_hat):
   '''
   return ((x_hat-x)**2).mean()
 
-def denorm(img_batch):
-    for i in range(img_batch.shape[0]):
-        single_img = img_batch[i] 
-        pil_img = inverse_transform(single_img)
-        img_batch[i] = transforms.ToTensor()(pil_img)  # Convert back to tensor
-    return img_batch
+def denorm(img):
+    img = img / 2 + 0.5
+    return img
 
 
 
