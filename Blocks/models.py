@@ -56,7 +56,7 @@ class Invertible1x1Conv2d(nn.Module):
 
     W = torch.matmul(self.P, torch.matmul(self.L*self.L_mask +self.identity, (self.U*self.U_mask + self.s.diag() ))).unsqueeze(2).unsqueeze(3)
 
-    log_det_W = torch.log(self.s.abs()).sum() # Migth need to learn log_scale instead?
+    log_det_W = torch.log(self.s.abs()).sum() # Might need to learn log_scale instead?
 
     return F.conv2d(x, W), x.shape[2]* x.shape[3] * log_det_W
 
@@ -266,7 +266,7 @@ class Glow(nn.Module):
 
 
     z_0 = z_i
-    for n_layers in range(len(self.flow_layers)):
+    for _n_layers in range(len(self.flow_layers)):
       z_0 =  self.unsqueeze2d(z_0)
 
     # TODO come back and store the values of z_i in a matrix
@@ -278,7 +278,7 @@ class Glow(nn.Module):
   def inverse(self, z_0):
     z_i = z_0
 
-    for n_layers in range(len(self.flow_layers)):
+    for _n_layers in range(len(self.flow_layers)):
       z_i =  self.squeeze2d(z_i)
 
 

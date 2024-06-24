@@ -187,6 +187,20 @@ def evaluate(model, title):
 
 evaluate(model, "before")
 
+def test_layers(x, model):
+
+    for layer in model.flow_layers:
+      x = model.squeeze2d(x)
+      for flow_step in layer:
+        for module in flow_step.layers:
+            z_i, _ = module(x)
+            print(type(module).__name__, ":", mse(x, module.inverse(z_i)))
+            print("-"*50)
+            x = z_i
+
+
+    return
+
 
 
 torch.cuda.empty_cache()
@@ -198,7 +212,7 @@ def loss_function_Glow(target_distribution, z, log_det_jacobian):
 from torch.distributions.normal import Normal
 
 model.train()
-target_distribution = Normal(torch.tensor(0).float().to(device),torch.tensor(1).float().to(device))
+target_distribution = Normal(torch.tensor(0, dtype=torch.float32).to(device),torch.tensor(1, dtype=torch.float32).to(device))
 # <- You may wish to add logging info here
 for epoch in range(num_epochs):
     total_loss = 0 # <- You may wish to add logging info here
@@ -253,3 +267,8 @@ for epoch in range(num_epochs):
                 'weights/Glow_model.pth')
 
 evaluate(model, "after")
+
+
+sample_inputs, _ = next(iter(testloader))
+fixed_input = sample_inputs[0:32, :, :, :]
+test_layers(fixed_input.to(device), model)
