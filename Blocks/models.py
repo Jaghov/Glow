@@ -38,7 +38,9 @@ class Invertible1x1Conv2d(nn.Module):
     self.P = nn.Parameter(P, requires_grad=False)
     self.L = nn.Parameter(L, requires_grad=True)
     self.U = nn.Parameter(U-s.diag(), requires_grad=True)
-    self.s = nn.Parameter(s, requires_grad=True)
+
+    self.s_sign = torch.sign(s)
+    self.log_s = nn.Parameter(torch.log(abs(s)), requires_grad=True)
 
     self.L_mask = torch.tril(torch.ones(self.L.shape, dtype=torch.bool), diagonal=-1)
     self.U_mask = torch.triu(torch.ones(self.U.shape, dtype=torch.bool), diagonal=1)
@@ -46,30 +48,31 @@ class Invertible1x1Conv2d(nn.Module):
 
 
     self.weights_updated = True
-    self.W_inv = None
 
   def forward(self, x):
     self.identity = self.identity.to(x.device)
     self.L_mask = self.L_mask.to(x.device)
     self.U_mask = self.U_mask.to(x.device)
+    self.log_s = self.log_s.to(x.device)
+    self.s_sign = self.s_sign.to(x.device)
 
+    W = torch.matmul(self.P, torch.matmul(self.L*self.L_mask +self.identity, (self.U*self.U_mask + (torch.exp(self.log_s) * self.s_sign ).diag() ))).unsqueeze(2).unsqueeze(3)
 
-    W = torch.matmul(self.P, torch.matmul(self.L*self.L_mask +self.identity, (self.U*self.U_mask + self.s.diag() ))).unsqueeze(2).unsqueeze(3)
+    log_det_W = torch.log(torch.exp(self.log_s)).sum() # Might need to learn log_scale instead?
+    self.weights_updated = True
 
-    log_det_W = torch.log(self.s.abs()).sum() # Might need to learn log_scale instead?
-
-    return F.conv2d(x, W), x.shape[2]* x.shape[3] * log_det_W
+    return F.conv2d(x, W, bias=None), x.shape[2]* x.shape[3] * log_det_W
 
   def inverse(self, z):
 
     if self.weights_updated is True:
-      self.W_inv = torch.matmul(self.P, torch.matmul(self.L*self.L_mask +self.identity, (self.U*self.U_mask + self.s.diag() ))).inverse().unsqueeze(2).unsqueeze(3)
+      self.W_inv = torch.matmul(self.P, torch.matmul(self.L*self.L_mask +self.identity, (self.U*self.U_mask + (torch.exp(self.log_s) * self.s_sign ).diag() ))).inverse().unsqueeze(2).unsqueeze(3)
       self.weights_updated = False
 
 
-    return F.conv2d(z, self.W_inv)
+    return F.conv2d(z, self.W_inv, bias=None)
 
-## TODO convert self.s to self.log_s for stability
+## TODO convert self.s to self.log_s for stability DONE
 
 
 class WeightNormConv2d(nn.Module):
