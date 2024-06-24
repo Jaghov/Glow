@@ -47,7 +47,7 @@ transform = transforms.Compose(
 
 
 # Necessary Hyperparameters
-num_epochs = 1
+num_epochs = 10
 learning_rate = 5e-5
 batch_size = 64
 
