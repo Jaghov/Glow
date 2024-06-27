@@ -48,11 +48,12 @@ transform = transforms.Compose(
 
 # Necessary Hyperparameters
 num_epochs = 100
-learning_rate = 5e-5
+learning_rate = 3e-4
 batch_size = 64
 
 # Additional Hyperparameters
 hidden_dim = 64
+max_clip = 3
 
 
 trainset = datasets.CIFAR10(root='./data', train=True,
@@ -239,13 +240,16 @@ for epoch in range(num_epochs):
             optimizer.zero_grad()
             loss.backward()
 
+            # Clip gradient
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_clip)
+
             # update params
             optimizer.step()
 
             # Logging
             total_loss += loss.item()
             prior = target_distribution.log_prob(z).mean()
-            # jacobian = log_det_jacobian/z.shape[0]
+            jacobian = log_det_jacobian/z.shape[0]
             
 
 
@@ -256,11 +260,11 @@ for epoch in range(num_epochs):
             #######################################################################
             #                       ** END OF YOUR CODE **
             #######################################################################
-            if batch_idx % 20 == 0:
+            if batch_idx % 100 == 0:
                 with torch.no_grad():
                     err = mse(data, model.inverse(z)).mean()
                 tepoch.set_description(f"Epoch {epoch}")
-                tepoch.set_postfix(loss=loss.item()/len(data), log_prior=prior.item(), recon_err = err.item())
+                tepoch.set_postfix(loss=loss.item()/len(data), log_prior=prior.item(), log_jacobian=jacobian.item(), recon_err = err.item())
 
     # save the model
     if epoch == num_epochs - 1:
