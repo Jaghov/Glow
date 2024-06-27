@@ -47,7 +47,7 @@ transform = transforms.Compose(
 
 
 # Necessary Hyperparameters
-num_epochs = 10
+num_epochs = 100
 learning_rate = 5e-5
 batch_size = 64
 
@@ -107,7 +107,7 @@ def denorm(img):
 #   print(torch.allclose(batch, b))
 #   print(mse(batch, b))
 
-model = Glow().to(device)
+model = Glow(n_flow_steps=32, n_flow_layers=3).to(device)
 params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print("Total number of parameters is: {}".format(params))
 # print(model)
@@ -246,7 +246,7 @@ for epoch in range(num_epochs):
             total_loss += loss.item()
             prior = target_distribution.log_prob(z).mean()
             # jacobian = log_det_jacobian/z.shape[0]
-            # err += mse(data, model.inverse(z))
+            
 
 
 
@@ -257,8 +257,10 @@ for epoch in range(num_epochs):
             #                       ** END OF YOUR CODE **
             #######################################################################
             if batch_idx % 20 == 0:
+                with torch.no_grad():
+                    err = mse(data, model.inverse(z)).mean()
                 tepoch.set_description(f"Epoch {epoch}")
-                tepoch.set_postfix(loss=loss.item()/len(data), prior=prior, err = err)
+                tepoch.set_postfix(loss=loss.item()/len(data), log_prior=prior.item(), recon_err = err.item())
 
     # save the model
     if epoch == num_epochs - 1:
@@ -269,6 +271,6 @@ for epoch in range(num_epochs):
 evaluate(model, "after")
 
 
-sample_inputs, _ = next(iter(testloader))
-fixed_input = sample_inputs[0:32, :, :, :]
-test_layers(fixed_input.to(device), model)
+#sample_inputs, _ = next(iter(testloader))
+#fixed_input = sample_inputs[0:32, :, :, :]
+#test_layers(fixed_input.to(device), model)
