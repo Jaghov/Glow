@@ -53,7 +53,7 @@ batch_size = 128
 
 # Additional Hyperparameters
 hidden_dim = 64
-max_clip = 1
+max_clip = 0.02
 
 
 trainset = datasets.CIFAR10(root='./data', train=True,
@@ -197,6 +197,22 @@ def evaluate(model, title):
         # plt.figure(figsize = (8,8))
         # show(samples)
 
+def rand_sample(model, tag, z):
+    z = z.to(device)
+    with torch.no_grad():
+        #######################################################################
+        #                       ** START OF YOUR CODE **
+        #######################################################################
+        samples = model.inverse(z)
+        #######################################################################
+        #                       ** END OF YOUR CODE **
+        #######################################################################
+
+        samples = samples.cpu()
+        samples = make_grid(denorm(samples), nrow=6, padding=2, normalize=False,
+                                value_range=None, scale_each=False, pad_value=0)
+        save_image(samples, f'results/sampled_at_epoch-{tag}.png')
+
 evaluate(model, "before")
 
 def test_layers(x, model):
@@ -226,10 +242,11 @@ from torch.distributions.normal import Normal
 model.train()
 target_distribution = Normal(torch.tensor(0, dtype=torch.float32).to(device),torch.tensor(1, dtype=torch.float32).to(device))
 # <- You may wish to add logging info here
+n_samples = 6
+sample = torch.randn(n_samples, 3, 32, 32)
 for epoch in range(num_epochs):
     total_loss = 0 # <- You may wish to add logging info here
     err = 0
-    weights = 0
 
     with tqdm.tqdm(trainloader, unit="batch") as tepoch:
         for batch_idx, (data, _) in enumerate(tepoch):
@@ -277,6 +294,9 @@ for epoch in range(num_epochs):
                     err = mse(data, model.inverse(z)).mean()
                 tepoch.set_description(f"Epoch {epoch}")
                 tepoch.set_postfix(loss=loss.item()/len(data), log_prior=prior.item(), log_jacobian=jacobian.item(), recon_err = err.item(), avg_weights=grad_size(model).item() )
+
+    if epoch % 5 == 0:
+        rand_sample(model, epoch, sample)
 
     # save the model
     if epoch == num_epochs - 1:
