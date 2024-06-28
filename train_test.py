@@ -108,7 +108,7 @@ def denorm(img):
 #   print(torch.allclose(batch, b))
 #   print(mse(batch, b))
 
-model = Glow(n_flow_steps=32, n_flow_layers=3).to(device)
+model = Glow(n_flow_steps=3, n_flow_layers=3).to(device)
 params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print("Total number of parameters is: {}".format(params))
 # print(model)
@@ -119,12 +119,14 @@ optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 def grad_size(model):
     count = 0
     average = 0
+    max_grad = 0
     for w in model.parameters():
         v = w.abs().mean() # number of elements in w
         n = w.numel()
         count += n
         average += n * v
-    return average / count
+        max_grad = max(w.abs().max(), max_grad )
+    return average / count , max_grad
 
 
 # print('### Glow Test ###')
@@ -247,6 +249,7 @@ sample = torch.randn(n_samples, 3, 32, 32)
 for epoch in range(num_epochs):
     total_loss = 0 # <- You may wish to add logging info here
     err = 0
+    max_grad = 0
 
     with tqdm.tqdm(trainloader, unit="batch") as tepoch:
         for batch_idx, (data, _) in enumerate(tepoch):
@@ -293,7 +296,8 @@ for epoch in range(num_epochs):
                 with torch.no_grad():
                     err = mse(data, model.inverse(z)).mean()
                 tepoch.set_description(f"Epoch {epoch}")
-                tepoch.set_postfix(loss=loss.item()/len(data), log_prior=prior.item(), log_jacobian=jacobian.item(), recon_err = err.item(), avg_weights=grad_size(model).item() )
+                avg_grad, max_grad = grad_size(model)
+                tepoch.set_postfix(loss=loss.item()/len(data), log_prior=prior.item(), log_jacobian=jacobian.item(), recon_err = err.item(), avg_weights=avg_grad.item(), max_grad=max_grad.item() )
 
     if epoch % 5 == 0:
         rand_sample(model, epoch, sample)
