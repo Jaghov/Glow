@@ -48,12 +48,12 @@ transform = transforms.Compose(
 
 # Necessary Hyperparameters
 num_epochs = 100
-learning_rate = 3e-4
-batch_size = 64
+learning_rate = 5e-5
+batch_size = 128
 
 # Additional Hyperparameters
 hidden_dim = 64
-max_clip = 3
+max_clip = 1
 
 
 trainset = datasets.CIFAR10(root='./data', train=True,
@@ -114,6 +114,17 @@ print("Total number of parameters is: {}".format(params))
 # print(model)
 # optimizer
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+
+
+def grad_size(model):
+    count = 0
+    average = 0
+    for w in model.parameters():
+        v = w.abs().mean() # number of elements in w
+        n = w.numel()
+        count += n
+        average += n * v
+    return average / count
 
 
 # print('### Glow Test ###')
@@ -218,6 +229,7 @@ target_distribution = Normal(torch.tensor(0, dtype=torch.float32).to(device),tor
 for epoch in range(num_epochs):
     total_loss = 0 # <- You may wish to add logging info here
     err = 0
+    weights = 0
 
     with tqdm.tqdm(trainloader, unit="batch") as tepoch:
         for batch_idx, (data, _) in enumerate(tepoch):
@@ -264,7 +276,7 @@ for epoch in range(num_epochs):
                 with torch.no_grad():
                     err = mse(data, model.inverse(z)).mean()
                 tepoch.set_description(f"Epoch {epoch}")
-                tepoch.set_postfix(loss=loss.item()/len(data), log_prior=prior.item(), log_jacobian=jacobian.item(), recon_err = err.item())
+                tepoch.set_postfix(loss=loss.item()/len(data), log_prior=prior.item(), log_jacobian=jacobian.item(), recon_err = err.item(), avg_weights=grad_size(model).item() )
 
     # save the model
     if epoch == num_epochs - 1:

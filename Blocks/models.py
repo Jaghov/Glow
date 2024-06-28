@@ -141,11 +141,11 @@ class ConvBlock(nn.Module):
 
 class AffineCoupling(nn.Module):
     def __init__(self, n_channels):
-        super(AffineCoupling, self).__init__()
-        self.scale_scale = nn.Parameter(torch.zeros(1), requires_grad=True)
-        self.shift_scale = nn.Parameter(torch.zeros(1), requires_grad=True)
-        # self.net = ResNet(in_channels=n_channels//2)
-        self.net = ConvBlock(in_channels= n_channels//2)
+      super(AffineCoupling, self).__init__()
+      self.scale_scale = nn.Parameter(torch.zeros(1), requires_grad=True)
+      self.shift_scale = nn.Parameter(torch.zeros(1), requires_grad=True)
+      # self.net = ResNet(in_channels=n_channels//2)
+      self.net = ConvBlock(in_channels= n_channels//2)
 
     def forward(self, x):
       # Split the input in 2 channelwise
@@ -179,9 +179,9 @@ class GlowStep(nn.Module):
   def __init__(self, n_channels, h, w):
     super(GlowStep, self).__init__()
     self.layers = nn.ModuleList([
-        ActNorm(n_channels, 3, 3),
-        Invertible1x1Conv2d(n_channels),
-        AffineCoupling(n_channels),
+      ActNorm(n_channels, 3, 3),
+      Invertible1x1Conv2d(n_channels),
+      AffineCoupling(n_channels),
     ])
 
   def forward(self, x):
