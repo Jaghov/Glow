@@ -37,17 +37,14 @@ print(f'Using {device}')
 
 transform = transforms.Compose(
     [transforms.ToTensor(),
-     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+     #transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+     ])
 
-#      # Inverse Transform (Unnormalize and Convert to PIL)
-# inverse_transform = transforms.Compose([
-#     transforms.Normalize((-1.0, -1.0, -1.0), (2.0, 2.0, 2.0)),  # Unnormalize
-#     transforms.ToPILImage()  # Convert back to PIL Image
-# ])
+
 
 
 # Necessary Hyperparameters
-num_epochs = 100
+num_epochs = 1000
 learning_rate = 5e-5
 batch_size = 128
 
@@ -76,8 +73,8 @@ classes = ('plane', 'car', 'bird', 'cat',
 dataiter = iter(trainloader)
 images, _ = next(dataiter)
 
-# print(images.shape)
-# print(images[0].min(), images[0].max())
+print(images.shape)
+print(images[0].min(), images[0].max())
 
 # # show images
 # show(make_grid(images))
@@ -108,7 +105,7 @@ def denorm(img):
 #   print(torch.allclose(batch, b))
 #   print(mse(batch, b))
 
-model = Glow(n_flow_steps=3, n_flow_layers=3).to(device)
+model = Glow(n_flow_steps=12, n_flow_layers=4).to(device)
 params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print("Total number of parameters is: {}".format(params))
 # print(model)
@@ -140,6 +137,8 @@ def grad_size(model):
 
 def evaluate(model, title):
     # *CODE FOR PART 1.2b IN THIS CELL*
+    normalised = False
+    
 
     # load the model
     print('Input images')
@@ -148,7 +147,9 @@ def evaluate(model, title):
     sample_inputs, _ = next(iter(testloader))
     fixed_input = sample_inputs[0:32, :, :, :]
     # visualize the original images of the last batch of the test set
-    img = make_grid(denorm(fixed_input), nrow=8, padding=2, normalize=False,
+    if normalised is True:
+        fixed_input = denorm(fixed_input)
+    img = make_grid(fixed_input, nrow=8, padding=2, normalize=False,
                     value_range=None, scale_each=False, pad_value=0)
 
     save_image(img, f'results/{title}_source_image.png')
@@ -171,7 +172,10 @@ def evaluate(model, title):
 
 
         recon_batch = recon_batch.cpu()
-        recon_batch = make_grid(denorm(recon_batch), nrow=8, padding=2, normalize=False,
+        if normalised is True:
+            recon_batch = denorm(recon_batch)
+
+        recon_batch = make_grid(recon_batch, nrow=8, padding=2, normalize=False,
                                 value_range=None, scale_each=False, pad_value=0)
 
         save_image(recon_batch, f'results/{title}_recon_image.png')
@@ -193,7 +197,9 @@ def evaluate(model, title):
         #######################################################################
 
         samples = samples.cpu()
-        samples = make_grid(denorm(samples), nrow=8, padding=2, normalize=False,
+        if normalised is True:
+            samples = denorm(samples)
+        samples = make_grid(samples, nrow=8, padding=2, normalize=False,
                                 value_range=None, scale_each=False, pad_value=0)
         save_image(samples, f'results/{title}_sampled_image.png')
         # plt.figure(figsize = (8,8))
@@ -231,25 +237,41 @@ def test_layers(x, model):
 
     return
 
-
+pi = torch.tensor(np.pi)
 
 torch.cuda.empty_cache()
-def loss_function_Glow(target_distribution, z, log_det_jacobian):
-  # print(log_det_jacobian)
-  log_likelihood = target_distribution.log_prob(z).mean() + log_det_jacobian/z.shape[0]
-  return -log_likelihood
+def loss_function_Glow(z, log_det_jacobian, n_bins=torch.tensor(256.)):
+  # fit z to normal distribution
+  log_p_z = -0.5 * (z ** 2 + torch.log(2 * pi ))
 
-from torch.distributions.normal import Normal
+  n_pixels = np.prod(z.size()[1:]) # H x W x C
+  c = n_pixels * torch.log(n_bins)
+
+
+
+
+  log_likelihood = log_p_z + log_det_jacobian.view(-1, 1, 1, 1) + c
+  loss = -log_likelihood
+
+  loss_in_nats = (loss / (torch.log(torch.tensor(2.))  * n_pixels)).mean()
+  log_p_z_in_nats = (log_p_z / (torch.log(torch.tensor(2.))  * n_pixels)).mean()
+  jacobian_in_nats = (log_det_jacobian / (torch.log(torch.tensor(2.))  * n_pixels)).mean()
+
+  return (
+    loss_in_nats,
+    log_p_z_in_nats, 
+    jacobian_in_nats,
+  )
+
+
 
 model.train()
-target_distribution = Normal(torch.tensor(0, dtype=torch.float32).to(device),torch.tensor(1, dtype=torch.float32).to(device))
-# <- You may wish to add logging info here
 n_samples = 6
 sample = torch.randn(n_samples, 3, 32, 32)
 for epoch in range(num_epochs):
     total_loss = 0 # <- You may wish to add logging info here
     err = 0
-    max_grad = 0
+    #max_grad = 0
 
     with tqdm.tqdm(trainloader, unit="batch") as tepoch:
         for batch_idx, (data, _) in enumerate(tepoch):
@@ -265,7 +287,7 @@ for epoch in range(num_epochs):
             z, log_det_jacobian = model.forward(data)
 
             # compute loss
-            loss = loss_function_Glow(target_distribution, z, log_det_jacobian)
+            loss, prior, jacobian = loss_function_Glow( z, log_det_jacobian)
 
 
             # backwards
@@ -273,15 +295,13 @@ for epoch in range(num_epochs):
             loss.backward()
 
             # Clip gradient
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_clip)
+            #torch.nn.utils.clip_grad_norm_(model.parameters(), max_clip)
 
             # update params
             optimizer.step()
 
             # Logging
             total_loss += loss.item()
-            prior = target_distribution.log_prob(z).mean()
-            jacobian = log_det_jacobian/z.shape[0]
             
 
 
@@ -296,10 +316,10 @@ for epoch in range(num_epochs):
                 with torch.no_grad():
                     err = mse(data, model.inverse(z)).mean()
                 tepoch.set_description(f"Epoch {epoch}")
-                avg_grad, max_grad = grad_size(model)
-                tepoch.set_postfix(loss=loss.item()/len(data), log_prior=prior.item(), log_jacobian=jacobian.item(), recon_err = err.item(), avg_weights=avg_grad.item(), max_grad=max_grad.item() )
+                #avg_grad, max_grad = grad_size(model)
+                tepoch.set_postfix(loss=loss.item()/len(data), log_prior=prior.item(), log_jacobian=jacobian.item(), recon_err = err.item() )#, avg_weights=avg_grad.item(), max_grad=max_grad.item() )
 
-    if epoch % 5 == 0:
+    if epoch % 10 == 0:
         rand_sample(model, epoch, sample)
 
     # save the model

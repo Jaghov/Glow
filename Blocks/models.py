@@ -3,6 +3,54 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, sampler
 import torch.nn.functional as F
 
+class Preprocess(nn.Module):
+  def __init__(self, alpha=0.05):
+    super(Preprocess, self).__init__()
+    self.alpha = alpha
+
+
+  def forward(self, x):
+    '''
+    x (torch.tensor): shape input image [individual pixel values
+    should be in the range 0-255]
+
+    returns 
+    y (torch.tensor):
+    log_det_jacobian (torch.tensor): shape (B x 1)
+    '''
+
+    # Add jittering/noise ,u from uniform dist to model continous
+    # variable p(y) = p( x + u )
+
+    u = torch.rand_like(x)
+    eps = 1e-5 # To prevent the image from being geq 1
+    y = x *(255. -eps) + u
+
+
+    y = (self.alpha + (1 - self.alpha)*y/256.)
+
+  
+    # convert to logit
+    logit_y = y.log() - (1-y).log()
+
+
+    # compute the jacobian of this step
+    log_det_jacobian = ( ( (1- self.alpha) / y) + (1-self.alpha) / (1-y) ).view(x.shape[0], -1).sum(-1)
+
+
+    return logit_y, log_det_jacobian
+  
+  def inverse(self, logit_y):
+
+    x = logit_y.exp()/( 1+ logit_y.exp())
+
+
+
+    return x
+
+
+
+
 class ActNorm(nn.Module):
   def __init__(self, num_channels, height, width):
     super(ActNorm, self).__init__()
@@ -20,6 +68,8 @@ class ActNorm(nn.Module):
       self.bias.data = -torch.mean(x, (0,2,3), keepdim=True)
       self.log_scale.data = -torch.log(torch.std(x, (0,2,3), keepdim=True))
       self.initialised=True
+
+    # check dimensionality of jacobian
 
     return (x * torch.exp(self.log_scale)) + self.bias, self.h * self.w * self.log_scale.sum()
 
@@ -58,7 +108,7 @@ class Invertible1x1Conv2d(nn.Module):
 
     W = torch.matmul(self.P, torch.matmul(self.L*self.L_mask +self.identity, (self.U*self.U_mask + (torch.exp(self.log_s) * self.s_sign ).diag() ))).unsqueeze(2).unsqueeze(3)
 
-    log_det_W = torch.log(torch.exp(self.log_s)).sum() # Might need to learn log_scale instead?
+    log_det_W = torch.log(torch.exp(self.log_s)).sum()
     self.weights_updated = True
 
     return F.conv2d(x, W, bias=None), x.shape[2]* x.shape[3] * log_det_W
@@ -159,7 +209,7 @@ class AffineCoupling(nn.Module):
 
       y = torch.cat([y_a, y_b], dim=1)
 
-      return y, log_scale.sum().to(device=x.device)
+      return y, log_scale.view(x.shape[0], -1).sum(-1).to(device=x.device)
 
     def inverse(self, y):
       y_a, y_b = y.chunk(2, dim=1)
@@ -185,7 +235,7 @@ class GlowStep(nn.Module):
     ])
 
   def forward(self, x):
-    log_det_jacobian_total = torch.tensor(0.0).to(device=x.device)
+    log_det_jacobian_total = torch.zeros(x.shape[0], device=x.device)
     z = x
 
     for layer in self.layers:
@@ -205,7 +255,7 @@ class Glow(nn.Module):
   def __init__(self, n_flow_steps=3, n_flow_layers=3, n_channels=3, height=32, width=32):
     super(Glow, self).__init__()
 
-    # self.preprocess = Preprocess()
+    self.preprocess = Preprocess()
     self.flow_layers = nn.ModuleList()
 
 
@@ -257,8 +307,10 @@ class Glow(nn.Module):
 
   def forward(self, x):
 
-    log_det_jacobian_total = torch.tensor(0.0, device=x.device)
-    z_i = x
+    log_det_jacobian_total = torch.zeros(x.shape[0], device=x.device)
+    z_i, log_det_jacobian = self.preprocess(x)
+
+    log_det_jacobian_total += log_det_jacobian
 
 
     for layer in self.flow_layers:
@@ -290,7 +342,13 @@ class Glow(nn.Module):
         z_i = flow_step.inverse(z_i)
       z_i = self.unsqueeze2d(z_i)
 
-    x = z_i
+    x = self.preprocess.inverse(z_i)
 
 
     return x
+
+
+# x = torch.rand((3,3))
+# layer = Preprocess()
+
+# print(layer(x))
