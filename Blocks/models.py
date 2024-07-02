@@ -69,8 +69,6 @@ class ActNorm(nn.Module):
       self.log_scale.data = -torch.log(torch.std(x, (0,2,3), keepdim=True))
       self.initialised=True
 
-    # check dimensionality of jacobian
-
     return (x * torch.exp(self.log_scale)) + self.bias, self.h * self.w * self.log_scale.sum()
 
   def inverse(self, z):

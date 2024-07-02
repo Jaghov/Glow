@@ -105,7 +105,7 @@ def denorm(img):
 #   print(torch.allclose(batch, b))
 #   print(mse(batch, b))
 
-model = Glow(n_flow_steps=12, n_flow_layers=4).to(device)
+model = Glow(n_flow_steps=12, n_flow_layers=3).to(device)
 params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print("Total number of parameters is: {}".format(params))
 # print(model)
