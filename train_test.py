@@ -217,7 +217,7 @@ def rand_sample(model, tag, z):
         #######################################################################
 
         samples = samples.cpu()
-        samples = make_grid(denorm(samples), nrow=6, padding=2, normalize=False,
+        samples = make_grid(samples, nrow=6, padding=2, normalize=False,
                                 value_range=None, scale_each=False, pad_value=0)
         save_image(samples, f'results/sampled_at_epoch-{tag}.png')
 
