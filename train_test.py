@@ -44,8 +44,8 @@ transform = transforms.Compose(
 
 
 # Necessary Hyperparameters
-num_epochs = 1000
-learning_rate = 5e-5
+num_epochs = 200
+learning_rate = 3e-5
 batch_size = 128
 
 # Additional Hyperparameters
@@ -63,8 +63,6 @@ testset = datasets.CIFAR10(root='./data', train=False,
 testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
                                          shuffle=False, num_workers=2)
 
-classes = ('plane', 'car', 'bird', 'cat',
-           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 
 
@@ -73,8 +71,8 @@ classes = ('plane', 'car', 'bird', 'cat',
 dataiter = iter(trainloader)
 images, _ = next(dataiter)
 
-print(images.shape)
-print(images[0].min(), images[0].max())
+# print(images.shape)
+# print(images[0].min(), images[0].max())
 
 # # show images
 # show(make_grid(images))
@@ -134,10 +132,20 @@ def grad_size(model):
 #   print(mse(x,x_hat))
 #   print(torch.allclose(x, x_hat))
 
+def list_to_z(z_list):
+    z_0 = z_list[-1]
+
+    for z_i in z_list[-2::-1]:
+      z_0 =  unsqueeze2d(z_0) # 3
+      z_0 = torch.cat((z_i, z_0), dim=1) # 6
+
+    z_0 = unsqueeze2d(z_0)
+    return z_0
+    
+
 
 def evaluate(model, title):
     # *CODE FOR PART 1.2b IN THIS CELL*
-    normalised = False
     
 
     # load the model
@@ -147,8 +155,6 @@ def evaluate(model, title):
     sample_inputs, _ = next(iter(testloader))
     fixed_input = sample_inputs[0:32, :, :, :]
     # visualize the original images of the last batch of the test set
-    if normalised is True:
-        fixed_input = denorm(fixed_input)
     img = make_grid(fixed_input, nrow=8, padding=2, normalize=False,
                     value_range=None, scale_each=False, pad_value=0)
 
@@ -165,15 +171,15 @@ def evaluate(model, title):
         #                       ** START OF YOUR CODE **
         #######################################################################
         recon_batch, _ = model.forward(fixed_input.to(device))
-        recon_batch = model.inverse(recon_batch)
+        recon_batch = model.inverse(list_to_z(recon_batch))
         #######################################################################
         #                       ** END OF YOUR CODE **
         #######################################################################
 
 
         recon_batch = recon_batch.cpu()
-        if normalised is True:
-            recon_batch = denorm(recon_batch)
+        # if normalised is True:
+        #     recon_batch = denorm(recon_batch)
 
         recon_batch = make_grid(recon_batch, nrow=8, padding=2, normalize=False,
                                 value_range=None, scale_each=False, pad_value=0)
@@ -197,8 +203,8 @@ def evaluate(model, title):
         #######################################################################
 
         samples = samples.cpu()
-        if normalised is True:
-            samples = denorm(samples)
+        # if normalised is True:
+        #     samples = denorm(samples)
         samples = make_grid(samples, nrow=8, padding=2, normalize=False,
                                 value_range=None, scale_each=False, pad_value=0)
         save_image(samples, f'results/{title}_sampled_image.png')
@@ -238,29 +244,32 @@ def test_layers(x, model):
     return
 
 pi = torch.tensor(np.pi)
-
 torch.cuda.empty_cache()
-def loss_function_Glow(z, log_det_jacobian, n_bins=torch.tensor(256.)):
+def loss_function_Glow(z_list, log_det_jacobian, n_bins=torch.tensor(256.)):
   # fit z to normal distribution
-  log_p_z = -0.5 * (z ** 2 + torch.log(2 * pi ))
-
-  n_pixels = np.prod(z.size()[1:]) # H x W x C
-  c = n_pixels * torch.log(n_bins)
 
 
+  log_p_z = 0
+  for z_i in z_list:
+    log_p_z += (-0.5 * (z_i ** 2 + torch.log(2 * pi ))).view(z_i.shape[0],-1).sum(-1)
+
+  n_pixels = 3 * 32 * 32 # H * W * C HARDCODE FOR NOW
+  c = -n_pixels * torch.log(n_bins)
 
 
-  log_likelihood = log_p_z + log_det_jacobian.view(-1, 1, 1, 1) + c
+
+
+  log_likelihood = log_p_z + log_det_jacobian + c
   loss = -log_likelihood
 
-  loss_in_nats = (loss / (torch.log(torch.tensor(2.))  * n_pixels)).mean()
-  log_p_z_in_nats = (log_p_z / (torch.log(torch.tensor(2.))  * n_pixels)).mean()
-  jacobian_in_nats = (log_det_jacobian / (torch.log(torch.tensor(2.))  * n_pixels)).mean()
+  loss_in_bits = (loss / (torch.log(torch.tensor(2.))  * n_pixels)).mean()
+  log_p_z_in_bits = (log_p_z / (torch.log(torch.tensor(2.))  * n_pixels)).mean()
+  jacobian_in_bits = (log_det_jacobian / (torch.log(torch.tensor(2.))  * n_pixels)).mean()
 
   return (
-    loss_in_nats,
-    log_p_z_in_nats, 
-    jacobian_in_nats,
+    loss_in_bits,
+    log_p_z_in_bits, 
+    jacobian_in_bits,
   )
 
 
@@ -284,10 +293,12 @@ for epoch in range(num_epochs):
 
 
             # forward pass
-            z, log_det_jacobian = model.forward(data)
+            z_list, log_det_jacobian = model.forward(data)
+
+            log_det_jacobian = log_det_jacobian.mean()
 
             # compute loss
-            loss, prior, jacobian = loss_function_Glow( z, log_det_jacobian)
+            loss, prior, jacobian = loss_function_Glow( z_list, log_det_jacobian)
 
 
             # backwards
@@ -313,6 +324,7 @@ for epoch in range(num_epochs):
             #                       ** END OF YOUR CODE **
             #######################################################################
             if batch_idx % 100 == 0:
+                z = list_to_z(z_list)
                 with torch.no_grad():
                     err = mse(data, model.inverse(z)).mean()
                 tepoch.set_description(f"Epoch {epoch}")
