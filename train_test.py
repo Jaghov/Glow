@@ -45,12 +45,12 @@ transform = transforms.Compose(
 
 # Necessary Hyperparameters
 num_epochs = 200
-learning_rate = 3e-5
+learning_rate = 1e-4
 batch_size = 128
 
 # Additional Hyperparameters
-hidden_dim = 64
-max_clip = 0.02
+# hidden_dim = 64
+# max_clip = 0.02
 
 
 trainset = datasets.CIFAR10(root='./data', train=True,
@@ -103,7 +103,7 @@ def denorm(img):
 #   print(torch.allclose(batch, b))
 #   print(mse(batch, b))
 
-model = Glow(n_flow_steps=12, n_flow_layers=3).to(device)
+model = Glow(n_channels=3, n_steps=12, n_flow_blocks=3).to(device)
 params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print("Total number of parameters is: {}".format(params))
 # print(model)
@@ -111,17 +111,17 @@ print("Total number of parameters is: {}".format(params))
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
 
-def grad_size(model):
-    count = 0
-    average = 0
-    max_grad = 0
-    for w in model.parameters():
-        v = w.abs().mean() # number of elements in w
-        n = w.numel()
-        count += n
-        average += n * v
-        max_grad = max(w.abs().max(), max_grad )
-    return average / count , max_grad
+# def grad_size(model):
+#     count = 0
+#     average = 0
+#     max_grad = 0
+#     for w in model.parameters():
+#         v = w.abs().mean() # number of elements in w
+#         n = w.numel()
+#         count += n
+#         average += n * v
+#         max_grad = max(w.abs().max(), max_grad )
+#     return average / count , max_grad
 
 
 # print('### Glow Test ###')
@@ -132,15 +132,6 @@ def grad_size(model):
 #   print(mse(x,x_hat))
 #   print(torch.allclose(x, x_hat))
 
-def list_to_z(z_list):
-    z_0 = z_list[-1]
-
-    for z_i in z_list[-2::-1]:
-      z_0 =  unsqueeze2d(z_0) # 3
-      z_0 = torch.cat((z_i, z_0), dim=1) # 6
-
-    z_0 = unsqueeze2d(z_0)
-    return z_0
     
 
 
@@ -170,8 +161,8 @@ def evaluate(model, title):
         #######################################################################
         #                       ** START OF YOUR CODE **
         #######################################################################
-        recon_batch, _ = model.forward(fixed_input.to(device))
-        recon_batch = model.inverse(list_to_z(recon_batch))
+        recon_batch, _ = model.forward(fixed_input.to(device), train=False)
+        recon_batch = model.inverse(recon_batch)
         #######################################################################
         #                       ** END OF YOUR CODE **
         #######################################################################
@@ -197,7 +188,7 @@ def evaluate(model, title):
         #######################################################################
         #                       ** START OF YOUR CODE **
         #######################################################################
-        samples = model.inverse(z)
+        samples = model.inverse(model.z_to_list(z))
         #######################################################################
         #                       ** END OF YOUR CODE **
         #######################################################################
@@ -217,7 +208,7 @@ def rand_sample(model, tag, z):
         #######################################################################
         #                       ** START OF YOUR CODE **
         #######################################################################
-        samples = model.inverse(z)
+        samples = model.inverse(model.z_to_list(z))
         #######################################################################
         #                       ** END OF YOUR CODE **
         #######################################################################
@@ -229,19 +220,6 @@ def rand_sample(model, tag, z):
 
 evaluate(model, "before")
 
-def test_layers(x, model):
-
-    for layer in model.flow_layers:
-      x = model.squeeze2d(x)
-      for flow_step in layer:
-        for module in flow_step.layers:
-            z_i, _ = module(x)
-            print(type(module).__name__, ":", mse(x, module.inverse(z_i)))
-            print("-"*50)
-            x = z_i
-
-
-    return
 
 pi = torch.tensor(np.pi)
 torch.cuda.empty_cache()
@@ -255,8 +233,6 @@ def loss_function_Glow(z_list, log_det_jacobian, n_bins=torch.tensor(256.)):
 
   n_pixels = 3 * 32 * 32 # H * W * C HARDCODE FOR NOW
   c = -n_pixels * torch.log(n_bins)
-
-
 
 
   log_likelihood = log_p_z + log_det_jacobian + c
@@ -290,6 +266,8 @@ for epoch in range(num_epochs):
             data = data.to(device) # Need at least one batch/random data with right shape - .view(-1,28*28)
                         # This is required to initialize to model properly below
                         # when we save the computational graph for testing (jit.save)
+            with torch.no_grad():
+                _,_, = model.forward(data)
 
 
             # forward pass
@@ -323,10 +301,9 @@ for epoch in range(num_epochs):
             #######################################################################
             #                       ** END OF YOUR CODE **
             #######################################################################
-            if batch_idx % 100 == 0:
-                z = list_to_z(z_list)
+            if batch_idx % 20 == 0:
                 with torch.no_grad():
-                    err = mse(data, model.inverse(z)).mean()
+                    err = mse(data, model.inverse(z_list)).mean()
                 tepoch.set_description(f"Epoch {epoch}")
                 #avg_grad, max_grad = grad_size(model)
                 tepoch.set_postfix(loss=loss.item()/len(data), log_prior=prior.item(), log_jacobian=jacobian.item(), recon_err = err.item() )#, avg_weights=avg_grad.item(), max_grad=max_grad.item() )
