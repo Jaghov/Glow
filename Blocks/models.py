@@ -33,6 +33,31 @@ def unsqueeze2d( x, factor=2):
   x = x.view(B, C // (factor ** 2), H *factor, W * factor)
   return x
 
+class MLP(nn.Module):
+    def __init__(self, in_dim, out_dim, hid_dim=128, activation='sigmoid'):
+        super().__init__()
+        self.fc_1 = nn.Linear(in_dim, hid_dim)
+        self.fc_2 = nn.Linear(hid_dim, hid_dim)
+        self.fc_out = nn.Linear(hid_dim, out_dim)
+        if activation=='sigmoid':
+            self.activation = F.sigmoid
+        elif activation=='cos':
+            self.activation = torch.cos
+        elif activation=='tanh':
+            self.activation = F.tanh
+        elif activation=='relu':
+            self.activation = F.relu
+        elif activation=='leakyrelu':
+            self.activation = lambda x: F.leaky_relu(x, negative_slope=0.2)
+        else:
+            raise NotImplementedError(activation + " not implemented")
+
+    def forward(self, x):
+        
+        out = self.activation(self.fc_1(x))
+        out = self.activation(self.fc_2(out))
+        return self.fc_out(out)
+
 class WeightNormConv2d(nn.Module):
     def __init__(self, in_channel, out_channel, kernel_size, stride=1, padding=0, bias=True):
         super().__init__()
@@ -64,38 +89,62 @@ class ConvBlock(nn.Module):
     return self.net(x)
 
 class Preprocess(nn.Module):
-    def __init__(self, bits=8, dequantize=True):
+    def __init__(self, bits=8, dequantize=True, input_type='image'):
         super().__init__()
-        self.bins = 2.**bits
+        self.n_bits = bits
+        self.n_bins = 2**bits
         self.dequantize = dequantize
+        self.input_type = input_type
         
     def forward(self, x, train=True):
-        if (train and self.dequantize) is False:
+
+        if self.input_type !='image':
             return x
-        y =  (x*255. + torch.rand_like(x))/self.bins
+        y = x * 255
+        if self.n_bits < 8:
+            y =  (y / 2 **(8 - self.n_bits)).floor()
+        
+        if (train and self.dequantize):
+             y = (y + torch.rand_like(y))
+        y = y / self.n_bins - 0.5
         return y
-    
+
+    def inverse(self, y):
+        if self.input_type !='image':
+            return y
+        x = (y + 0.5) * self.n_bins
+
+        if self.n_bits < 8:
+            x =  (x * 2 **(8 - self.n_bits)).floor()
+        
+        return  x/255
+        
     
 class Actnorm(nn.Module):
-    def __init__(self):
+    def __init__(self, input_type='image'):
         super().__init__()
         self.log_scale = None
         self.bias = None
-        self.h = None
-        self.w = None
+        self.input_size = None
+        self.input_type = input_type
         self.register_buffer("initialised", torch.tensor(0, dtype=bool))
         
     def forward(self, x):
         if self.initialised == False:
-            self.bias = nn.Parameter(-x.mean(dim=(0,2,3), keepdim=True), requires_grad=True)
-            self.log_scale = nn.Parameter(-torch.log(x.std(dim=(0,2,3), keepdim=True)), requires_grad=True)
+            if self.input_type is 'image':
+                self.bias = nn.Parameter(-x.mean(dim=(0,2,3), keepdim=True), requires_grad=True)
+                self.log_scale = nn.Parameter(-torch.log(x.std(dim=(0,2,3), keepdim=True)), requires_grad=True)
+                self.input_size = x.shape[2] * x.shape[3] # h * w
             
-            _, _, self.w, self.h = x.shape
+            elif self.input_type is 'factored':
+                self.bias = nn.Parameter(-x.mean(dim=(0), keepdim=True), requires_grad=True)
+                self.log_scale = nn.Parameter(-torch.log(x.std(dim=(0), keepdim=True)), requires_grad=True)
+                self.input_size = 1
             
             self.initialised = ~self.initialised
             
         z = (x  + self.bias) * self.log_scale.exp()
-        log_det_jacobian = self.h * self.w * self.log_scale.exp().abs().sum().unsqueeze(0)
+        log_det_jacobian =  self.log_scale.exp().abs().sum().unsqueeze(0)  *self.input_size
         return z, log_det_jacobian
     
     def inverse(self, z):
@@ -103,8 +152,13 @@ class Actnorm(nn.Module):
         return x
 
 class Inv1x1Conv(nn.Module):
-    def __init__(self, in_channel):
+    def __init__(self, in_channel, input_type='image'):
         super().__init__()
+    
+        self.input_type = input_type
+        self.input_size = None
+        
+        self.conv = F.conv1d if input_type != 'image' else F.conv2d
     
         weight = torch.randn(in_channel, in_channel)
         q, _ = torch.linalg.qr(weight)
@@ -135,29 +189,43 @@ class Inv1x1Conv(nn.Module):
         return weight
     
     def forward(self, x):
-        _, _, height, width = x.shape
-              
+        if self.input_size is None:
+            self.input_size = x.shape[2] * x.shape[3] if self.input_type == 'image' else 1
+        logdet = self.input_size * torch.sum(self.w_s)
         
-        weight = self.calc_weight().unsqueeze(2).unsqueeze(3)
+        weight = self.calc_weight()
+        
+        if self.input_type != 'image':
+            return x @ weight, logdet # Jacobian might be wrong because of the matmul instead of mul
+        
+        weight = weight.unsqueeze(2).unsqueeze(3)
+        
+        
 
-        z = F.conv2d(x, weight)
-        logdet = height * width * torch.sum(self.w_s)
+        z = self.conv(x, weight)
+        
 
         return z, logdet.unsqueeze(0)
 
     def inverse(self, z):
         weight_inv = self.calc_weight().inverse()
         
-        return F.conv2d(z, weight_inv.unsqueeze(2).unsqueeze(3))
+        if self.input_type != 'image':
+            return z @ weight_inv
+            
+        
+        weight_inv = weight_inv.unsqueeze(2).unsqueeze(3)
+        
+        return self.conv(z, weight_inv)
         
     
 class AffineCoupling(nn.Module):
-    def __init__(self, n_channels):
+    def __init__(self, n_channels, input_type='image'):
       super().__init__()
       self.scale_scale = nn.Parameter(torch.zeros(1), requires_grad=True)
       self.shift_scale = nn.Parameter(torch.zeros(1), requires_grad=True)
       # self.net = ResNet(in_channels=n_channels//2)
-      self.net = ConvBlock(in_channels= n_channels//2)
+      self.net = ConvBlock(in_channels= n_channels//2) if input_type== 'image' else MLP(in_dim=n_channels//2, out_dim=n_channels, hid_dim=n_channels)
 
     def forward(self, x):
       # Split the input in 2 channelwise
@@ -187,12 +255,12 @@ class AffineCoupling(nn.Module):
       return x
     
 class FlowStep(nn.Module):
-    def __init__(self, n_channels ):
+    def __init__(self, n_channels , input_type):
         super().__init__()
         self.layers = nn.ModuleList([
-            Actnorm(),
-            Inv1x1Conv(n_channels),
-            AffineCoupling(n_channels),
+            Actnorm(input_type=input_type),
+            Inv1x1Conv(n_channels, input_type=input_type),
+            AffineCoupling(n_channels, input_type=input_type),
         ])
         
     def forward(self, x):
@@ -212,18 +280,24 @@ class FlowStep(nn.Module):
         
     
 class FlowBlock(nn.Module):
-    def __init__(self, n_channels, n_steps, split=True) -> None:
+    def __init__(self, n_channels, n_steps, split=True, input_type='image'):
         super().__init__()
         self.flow_steps = nn.ModuleList()
+        self.input_type = input_type
         
         self.split = split
-        
-        for _ in range(n_steps):
-            self.flow_steps.append(FlowStep(4*n_channels))
-        
+        if input_type=='image':
+            for _ in range(n_steps):
+                self.flow_steps.append(FlowStep(4*n_channels, input_type=input_type))
+        else:
+            for _ in range(n_steps):
+                self.flow_steps.append(FlowStep(n_channels, input_type=input_type))
     def forward(self, x):
+        z = x
         # Squeeze
-        z = squeeze2d(x)
+        if self.input_type=='image':
+            z = squeeze2d(z)
+        
         log_det_jacobian_total = torch.zeros(x.shape[0], device=x.device)
         
         # Flow
@@ -248,9 +322,10 @@ class FlowBlock(nn.Module):
         # Invert flows
         for flow in self.flow_steps[::-1]:
             z = flow.inverse(z)
-        
+        x = z
         # invert squeeze
-        x = unsqueeze2d(z)
+        if self.input_type=='image':
+            x = unsqueeze2d(x)
         return x
         
        
@@ -258,27 +333,29 @@ class FlowBlock(nn.Module):
         
     
 class Glow(nn.Module):
-    def __init__(self, n_channels=3, n_steps=3, n_flow_blocks=3):
+    def __init__(self, n_channels=3, n_steps=3, n_flow_blocks=3, dequantize=True, input_type='image', n_bits=5):
         super(Glow, self).__init__()
 
-        self.preprocess = Preprocess()
+        self.preprocess = Preprocess(dequantize=dequantize, bits=n_bits, input_type=input_type)
         self.num_blocks = n_flow_blocks
         self.flow_layers = nn.ModuleList()
         
         for layer in range(0, n_flow_blocks-1):
             self.flow_layers.append(FlowBlock(n_channels=n_channels*2**(layer),
                                               n_steps=n_steps,
-                                              split=True))
+                                              split=True,
+                                              input_type=input_type))
         self.flow_layers.append(FlowBlock(n_channels=n_channels*2**(n_flow_blocks-1),
                                               n_steps=n_steps,
-                                              split=False))
+                                              split=False,
+                                              input_type=input_type))
         
     def forward(self, x, train=True):
         h = x
         z_list = []
         
-        if train is True:
-            h = self.preprocess(h)
+        
+        h = self.preprocess(h, train=train)
             
         log_det_jacobian_total = torch.zeros(x.shape[0], device=x.device)
         for block in self.flow_layers:
@@ -296,7 +373,7 @@ class Glow(nn.Module):
             z = z_list.pop() if block.split is True else None
             x = block.inverse(x,z)
 
-        return x
+        return self.preprocess.inverse(x)
     
     def list_to_z(self, z_list):
         z_0 = unsqueeze2d(z_list.pop())

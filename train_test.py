@@ -44,9 +44,10 @@ transform = transforms.Compose(
 
 
 # Necessary Hyperparameters
-num_epochs = 200
+num_epochs = 70
 learning_rate = 1e-4
-batch_size = 128
+batch_size = 16
+n_bits = 5
 
 # Additional Hyperparameters
 # hidden_dim = 64
@@ -71,14 +72,6 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
 dataiter = iter(trainloader)
 images, _ = next(dataiter)
 
-# print(images.shape)
-# print(images[0].min(), images[0].max())
-
-# # show images
-# show(make_grid(images))
-
-# print labels
-# print(' '.join(f'{classes[labels[j]]:5s}' for j in range(batch_size)))
 
 def mse(x, x_hat):
   '''
@@ -86,24 +79,11 @@ def mse(x, x_hat):
   '''
   return ((x_hat-x)**2).mean()
 
-def denorm(img):
-    img = img / 2 + 0.5
-    return img
 
 
 
-# # Test actnorm layer
-# actnorm = ActNorm(3,4,4)
 
-# batch = torch.randn(1,3,4,4)
-# print("### Actnorm layer test ###")
-# with torch.no_grad():
-#   a,_ = actnorm(batch)
-#   b = actnorm.inverse(a)
-#   print(torch.allclose(batch, b))
-#   print(mse(batch, b))
-
-model = Glow(n_channels=3, n_steps=12, n_flow_blocks=3).to(device)
+model = Glow(n_channels=3, n_steps=32, n_flow_blocks=3, n_bits=n_bits).to(device)
 params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print("Total number of parameters is: {}".format(params))
 # print(model)
@@ -123,14 +103,6 @@ optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 #         max_grad = max(w.abs().max(), max_grad )
 #     return average / count , max_grad
 
-
-# print('### Glow Test ###')
-# x = torch.randn(1, 3, 32, 32).to(device)
-# with torch.no_grad():
-#   z_0, log_det_jacobian_total = model(x)
-#   x_hat = model.inverse(z_0)
-#   print(mse(x,x_hat))
-#   print(torch.allclose(x, x_hat))
 
     
 
@@ -214,7 +186,7 @@ def rand_sample(model, tag, z):
         #######################################################################
 
         samples = samples.cpu()
-        samples = make_grid(samples, nrow=6, padding=2, normalize=False,
+        samples = make_grid(samples, nrow=8, padding=2, normalize=False,
                                 value_range=None, scale_each=False, pad_value=0)
         save_image(samples, f'results/sampled_at_epoch-{tag}.png')
 
@@ -251,7 +223,7 @@ def loss_function_Glow(z_list, log_det_jacobian, n_bins=torch.tensor(256.)):
 
 
 model.train()
-n_samples = 6
+n_samples = 16
 sample = torch.randn(n_samples, 3, 32, 32)
 for epoch in range(num_epochs):
     total_loss = 0 # <- You may wish to add logging info here
@@ -276,7 +248,7 @@ for epoch in range(num_epochs):
             log_det_jacobian = log_det_jacobian.mean()
 
             # compute loss
-            loss, prior, jacobian = loss_function_Glow( z_list, log_det_jacobian)
+            loss, prior, jacobian = loss_function_Glow( z_list, log_det_jacobian, n_bins=torch.tensor(2**n_bits))
 
 
             # backwards
@@ -308,7 +280,7 @@ for epoch in range(num_epochs):
                 #avg_grad, max_grad = grad_size(model)
                 tepoch.set_postfix(loss=loss.item()/len(data), log_prior=prior.item(), log_jacobian=jacobian.item(), recon_err = err.item() )#, avg_weights=avg_grad.item(), max_grad=max_grad.item() )
 
-    if epoch % 10 == 0:
+    if epoch % 1 == 0:
         rand_sample(model, epoch, sample)
 
     # save the model
@@ -320,6 +292,3 @@ for epoch in range(num_epochs):
 evaluate(model, "after")
 
 
-#sample_inputs, _ = next(iter(testloader))
-#fixed_input = sample_inputs[0:32, :, :, :]
-#test_layers(fixed_input.to(device), model)
